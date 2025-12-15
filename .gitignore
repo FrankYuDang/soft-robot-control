@@ -1,0 +1,6 @@
+.mat
+.xlsx
+.zip
+__pycache__
+/data
+.DS_Store

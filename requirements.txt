@@ -1,0 +1,7 @@
+numpy==1.24.3
+pandas>=2.0.0
+torch>=2.0.0
+openpyxl
+scikit-learn
+fastapi
+uvicorn
