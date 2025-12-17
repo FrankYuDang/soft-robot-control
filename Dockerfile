@@ -11,14 +11,21 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# 4. Install Dependencies: 先只复制 requirements.txt
-# 为什么？因为 Docker 有 Layer Caching 机制。
-# 只要你的依赖包没变，这一步就会被缓存，下次 build 会飞快。
-COPY requirements.txt .
+# --- 关键修改 START ---
+# 1. 单独安装 CPU 版 PyTorch
+# --index-url 指定了 CPU 版本的下载地址，体积非常小
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# 安装依赖，--no-cache-dir 减小镜像体积
+# 2. 然后再安装其他依赖 (requirements.txt 里已经没有 torch 了)
+COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+# --- 关键修改 END ---
+
+# --- 新增: 创建数据目录并把模型“烤”进去 ---
+RUN mkdir -p /app/data
+COPY data/trained_model.pth /app/data/trained_model.pth
+# ----------------------------------------
 
 # 5. Copy Code: 把剩下的代码复制进去
 # 注意：我们通常会用 .dockerignore 忽略掉 data 文件夹，防止镜像过大
