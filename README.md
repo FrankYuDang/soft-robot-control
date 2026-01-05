@@ -1,42 +1,38 @@
 # Soft Robot Control AI Service 🤖
 
+![CI/CD Status](https://github.com/FrankYuDang/soft-robot-control/actions/workflows/deploy.yml/badge.svg)
+![Python](https://img.shields.io/badge/Python-3.9-blue)
+![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+![AWS](https://img.shields.io/badge/Deployed%20on-AWS-orange)
+
 This project implements a production-grade AI microservice for controlling soft robotic manipulators. It utilizes a hybrid **Attention-LSTM** architecture to predict end-effector coordinates based on cable length inputs.
 
 ## 🏗 Architecture
 
-- **Model:** PyTorch-based Attention-LSTM (Hidden Dim: 256, Heads: 4)
-- **Serving:** FastAPI (Asynchronous REST API)
-- **Infrastructure:** Docker (Containerized Environment)
-- **Testing:** Pytest
+[Local Dev (Mac M1)] --> [GitHub Actions (CI/CD)] --> [Docker Hub] --> [AWS EC2 (Production)]
 
-## 🚀 Quick Start
+- **Model:** Attention-LSTM (Optimized with ONNX)
+- **API:** FastAPI (Asynchronous)
+- **Containerization:** Docker (Multi-arch build support)
+- **Deployment:** Automated AWS EC2 deployment via SSH tunneling
 
-### 1. Prerequisites
-Ensure you have **Docker Desktop** installed and running.
+## 🚀 Key Features
 
-### 2. Build the Image
+- **High Performance:** <15ms latency using ONNX Runtime.
+- **Resource Optimized:** Custom Docker image optimized for CPU-only environments (90% size reduction).
+- **Automated:** Full CI/CD pipeline handles testing, building, and deployment on every push.
+- **Robust:** Includes comprehensive logging and health checks.
+
+## 🛠 Quick Start (Run Locally)
+
 ```bash
-docker build -t soft-robot-api:v1 .
-```
-### 3. Run the Service
-```bash
-# Mount local data volume for model persistence
-docker run -p 8000:8000 -v $(pwd)/data:/app/data soft-robot-api:v1
-```
-### 4. API Usage
+# 1. Pull the image
+docker pull frankdang024/soft-robot-api:latest
 
-Visit the interactive Swagger documentation at:
+# 2. Run the container
+docker run -p 8000:8000 frankdang024/soft-robot-api:latest
 
-`http://127.0.0.1:8000/docs`
 
-Sample Request (POST /predict):
-```json
-{
-  "sequence": [
-    [0.5, 0.5, 0.5],
-    ... (10 time steps) ...
-  ]
-}
 ```
 🛠 Project Structure
 ```

@@ -4,3 +4,5 @@ openpyxl
 scikit-learn
 fastapi
 uvicorn
+sqlalchemy
+psycopg2-binary

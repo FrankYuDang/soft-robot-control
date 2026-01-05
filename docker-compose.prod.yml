@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  api:
+    # ❌ 删掉: build: .
+    # ✅ 新增: 直接使用你 CI/CD 推送到云端的镜像
+    image: frankdang024/soft-robot-api:latest 
+    container_name: soft-robot-app
+    ports:
+      - "8000:8000"
+    environment:
+      # 在云端，数据库就在隔壁，host 还是叫 db
+      - DATABASE_URL=postgresql://user:password@db:5432/robot_data
+    depends_on:
+      - db
+    # 自动重启: 如果程序崩了，或者服务器重启了，它会自动复活
+    restart: always 
+
+  db:
+    image: postgres:15-alpine
+    container_name: soft-robot-db
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=robot_data
+    volumes:
+      # 数据持久化: 即使删除容器，数据也会留在服务器硬盘里
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  postgres_data:

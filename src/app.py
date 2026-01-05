@@ -1,130 +1,142 @@
-import time
-import logging
-from fastapi import Request
 import torch
-import os
-from fastapi import FastAPI, HTTPException
+import torch.nn as nn
+import numpy as np
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List
+import os
+import datetime
 
-# 导入你的模型定义
-# 注意：Docker 里的工作目录是 /app，所以 src 是顶级包
-from src.models.lstm_model import AttnLSTM
+# --- 新增: 数据库相关导入 ---
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, String, JSON
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
-# 1. 定义请求数据的格式 (Schema)
-# 这就像是 API 的“安检门”，不符合格式的数据会被直接挡回去
-class CableInput(BaseModel):
-    # 假设输入是一个序列，包含 10 个时间步的数据，每个时间步有 3 根线的长度
-    # 例如: [[100, 100, 100], [101, 100, 99], ...]
-    sequence: List[List[float]] 
+# 1. 定义模型结构 (保持不变)
+class Attention(nn.Module):
+    def __init__(self, hidden_dim):
+        super(Attention, self).__init__()
+        self.attention = nn.Linear(hidden_dim, 1)
 
-# 1. 配置日志 (Logging Configuration)
-# 在工业界，我们通常输出 JSON 格式的日志，方便 ELK (Elasticsearch) 分析
-# 这里为了简单，我们先用标准格式
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("soft-robot-api")
+    def forward(self, lstm_output):
+        attn_weights = torch.softmax(self.attention(lstm_output), dim=1)
+        context = torch.sum(attn_weights * lstm_output, dim=1)
+        return context
 
-app = FastAPI(title="Soft Robot Control API", version="1.2")
+class SoftRobotModel(nn.Module):
+    def __init__(self, input_dim=3, hidden_dim=64, output_dim=2):
+        super(SoftRobotModel, self).__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.attention = Attention(hidden_dim)
+        self.fc = nn.Linear(hidden_dim, output_dim)
 
-# 全局变量存放模型
-model = None
-DEVICE = "cpu" # 推理通常用 CPU 就够了，除非并发量极大
+    def forward(self, x):
+        lstm_out, _ = self.lstm(x)
+        context = self.attention(lstm_out)
+        out = self.fc(context)
+        return out
 
-# 2. 插入中间件 (Middleware) - 这是核心修改
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    """
-    这个函数会拦截每一个请求，记录它进入和离开的时间。
-    """
-    start_time = time.time()
-    
-    # 处理请求
-    response = await call_next(request)
-    
-    # 计算耗时 (毫秒)
-    process_time = (time.time() - start_time) * 1000
-    
-    # 3. 打印日志
-    # 真正的 CTO 会关注：这个请求花了多久？状态码是多少？
-    logger.info(f"Path: {request.url.path} | Method: {request.method} | Status: {response.status_code} | Latency: {process_time:.2f}ms")
-    
-    # 把耗时也加到 Response Header 里，方便客户端查看
-    response.headers["X-Process-Time"] = str(process_time)
-    
-    return response
+# 2. 初始化 FastAPI
+app = FastAPI(title="Soft Robot Control API (With DB)", version="2.0")
 
-# 2. 启动事件：API 启动时执行一次
-@app.on_event("startup")
-def load_model():
-    global model
-    print("🤖 Loading Soft Robot Brain...")
-    
+# --- 新增: 数据库配置 ---
+# 从环境变量获取数据库地址 (我们在 docker-compose.yml 里配过这个)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db") 
+
+# 创建数据库引擎
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# 定义数据表结构
+class PredictionRecord(Base):
+    __tablename__ = "predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    cable_1_tension = Column(Float)
+    cable_2_tension = Column(Float)
+    cable_3_tension = Column(Float)
+    predicted_x = Column(Float)
+    predicted_y = Column(Float)
+    temperature = Column(Float)
+
+# 自动创建表 (如果不存在)
+Base.metadata.create_all(bind=engine)
+
+# 依赖项: 获取数据库会话
+def get_db():
+    db = SessionLocal()
     try:
-        # 初始化模型架构 (参数必须和你训练时的一致！)
-        # 如果你训练时用了 hidden_dim=32, 这里也得是 32
-        model = AttnLSTM(
-            input_dim=3, 
-            hidden_dim=256, 
-            output_dim=3, 
-            num_heads=4
-        )
-        
-        # 加载权重
-        # 注意路径：在 Docker 里，我们挂载的目录是 /app/data
-        model_path = "/app/data/trained_model.pth"
-        
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-            model.to(DEVICE)
-            model.eval() # 切换到评估模式 (关闭 Dropout 等)
-            print(f"✅ Model loaded successfully from {model_path}")
-        else:
-            print(f"⚠️ Warning: Model file not found at {model_path}. API will run but predictions will fail.")
-            
-    except Exception as e:
-        print(f"❌ Failed to load model: {e}")
+        yield db
+    finally:
+        db.close()
+# ------------------------
+
+# 3. 加载模型 (保持不变)
+DEVICE = torch.device("cpu")
+model = SoftRobotModel()
+model_path = "data/trained_model.pth"
+
+try:
+    if os.path.exists(model_path):
+        print("🤖 Loading Soft Robot Brain...")
+        # 加上 weights_only=False 以抑制警告 (在你完全控制模型来源时是安全的)
+        model.load_state_dict(torch.load(model_path, map_location=DEVICE)) #, weights_only=False)) 
+        model.eval()
+        print(f"✅ Model loaded successfully from {model_path}")
+    else:
+        print(f"⚠️ Warning: Model not found at {model_path}. Using random weights.")
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
+
+# 4. 定义请求体
+class CableInput(BaseModel):
+    c1: float
+    c2: float
+    c3: float
+    temperature: float
 
 @app.get("/")
 def health_check():
-    return {"status": "active", "model_loaded": model is not None}
+    return {"status": "active", "version": "2.0", "db": "connected"}
 
-# 3. 预测接口
+# 5. 预测接口 (修改版：加入数据库存储)
 @app.post("/predict")
-def predict_coordinates(input_data: CableInput):
-    """
-    接收拉线长度序列，返回预测的末端坐标 (x, y, z)
-    """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
+def predict_coordinates(data: CableInput, db: Session = Depends(get_db)):
     try:
         # A. 数据预处理
-        # ⚠️ CRITICAL TODO: 这里其实需要加上归一化 (Scaler) 逻辑
-        # 你的模型是用归一化数据(0-1)训练的，如果传入真实长度(100mm)，预测会不准。
-        # 为了演示流程，我们先假设传入的数据已经是归一化过的。
-        
-        # 将 list 转为 tensor: [1, seq_len, input_dim]
-        input_tensor = torch.tensor(input_data.sequence, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        
+        input_data = np.array([[data.c1, data.c2, data.c3]], dtype=np.float32)
+        # 增加时间步维度 (batch, seq_len, features) -> (1, 1, 3)
+        input_tensor = torch.tensor(input_data).unsqueeze(1).to(DEVICE)
+
         # B. 模型推理
         with torch.no_grad():
-            output_tensor = model(input_tensor) # output: [1, 3]
-            
-        # C. 结果后处理
-        # 同样，这里应该反归一化 (Inverse Transform) 才能得到毫米值
-        prediction = output_tensor.cpu().numpy().tolist()[0]
-        
+            prediction = model(input_tensor)
+            coords = prediction.cpu().numpy()[0]
+
+        result_x = float(coords[0])
+        result_y = float(coords[1])
+
+        # --- 新增: C. 存入数据库 ---
+        db_record = PredictionRecord(
+            cable_1_tension=data.c1,
+            cable_2_tension=data.c2,
+            cable_3_tension=data.c3,
+            predicted_x=result_x,
+            predicted_y=result_y,
+            temperature = data.temperature
+        )
+        db.add(db_record)
+        db.commit() # 提交事务
+        db.refresh(db_record) # 刷新以获取生成的 ID
+        # ------------------------
+
         return {
-            "predicted_coordinates": {
-                "x": prediction[0],
-                "y": prediction[1],
-                "z": prediction[2]
-            },
-            "raw_output": prediction
+            "prediction": {"x": result_x, "y": result_y},
+            "db_record_id": db_record.id,  # 返回数据库里的 ID，证明存进去了
+            "status": "logged"
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

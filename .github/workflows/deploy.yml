@@ -38,12 +38,15 @@ jobs:
         username: ${{ secrets.AWS_USER }}
         key: ${{ secrets.AWS_PRIVATE_KEY }}
         script: |
-          # 停止旧容器 (如果存在)
-          docker stop soft-robot-v2 || true
-          docker rm soft-robot-v2 || true
+          cd ~/soft-robot-app
           
-          # 强制拉取最新镜像
-          docker pull ${{ secrets.DOCKER_USERNAME }}/soft-robot-api:latest
+          # 1. 显式拉取最新镜像 (确保获取刚才 CI 构建的版本)
+          docker-compose -f docker-compose.prod.yml pull api
           
-          # 启动新容器
-          docker run -d -p 8000:8000 --name soft-robot-v2 ${{ secrets.DOCKER_USERNAME }}/soft-robot-api:latest
+          # 2. 启动/更新集群
+          # up -d: 后台运行
+          # --remove-orphans: 清理掉以前那些手动的旧容器
+          docker-compose -f docker-compose.prod.yml up -d --remove-orphans
+          
+          # 3. 清理多余的旧镜像 (节省空间)
+          docker image prune -f
