@@ -27,6 +27,16 @@ services:
       # 数据持久化: 即使删除容器，数据也会留在服务器硬盘里
       - postgres_data:/var/lib/postgresql/data
     restart: always
+# ✅ 新增: 数据库管理界面
+  adminer:
+    image: adminer
+    container_name: soft-robot-adminer
+    ports:
+      - "8080:8080"  # 浏览器访问 8080 -> 容器内部 8080
+    networks:
+      - robot-network
+    depends_on:
+      - db
 
 volumes:
   postgres_data:
