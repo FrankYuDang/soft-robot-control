@@ -31,10 +31,9 @@ services:
   adminer:
     image: adminer
     container_name: soft-robot-adminer
+    restart: always
     ports:
       - "8080:8080"  # 浏览器访问 8080 -> 容器内部 8080
-    networks:
-      - robot-network
     depends_on:
       - db
 
