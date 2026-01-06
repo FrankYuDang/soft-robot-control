@@ -14,7 +14,7 @@ This project implements a production-grade AI microservice for controlling soft 
 
 *(The system automatically records every inference request into the database for future retraining)*
 
-![Database Dashboard](./assets/adminer_dashboard.jpg)
+![Database Dashboard](./assets/adminer_dashboard.png)
 
 ## 🏗 Architecture
 
